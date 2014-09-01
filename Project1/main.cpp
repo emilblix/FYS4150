@@ -4,9 +4,6 @@
 using namespace std;
 using namespace arma;
 
-
-
-
 int main()
 {
     double n,gausstall,h;
