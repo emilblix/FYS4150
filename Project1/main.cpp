@@ -1,58 +1,183 @@
 #include <iostream>
 #include <armadillo>
-
+#include <string>
+#include <sstream>
 using namespace std;
 using namespace arma;
+#include "time.h"
 
 int main()
 {
-    double n,gausstall,h;
-    //n=5;                                    // Testverdi for n
+    // Time measurement
+    clock_t start, finish;
+    start = clock();
+
+    double h,h_squared;
+    int n;
     cout << "Enter value for n: ";
     cin >> n;
-    h=1/(n+1);
-    vec A= vec(n); A.fill(-1); A(0)=0;      // Lager en vektor av lengde n der alle verdier bortsett fra den første er -1 (nedre tridiagonal)
-    vec B= vec(n); B.fill(2);               // Lager en vektor av lengde n der alle verdier er 2
-    vec C= vec(n); C.fill(-1); C(n-1)=0;    // Lager en vektor av lengde n der alle verdier bortsett fra den siste er -1 (øvre tridiagonal)
-    vec X= vec(n); //X(0)=5;X(1)=3;X(2)=2;X(3)=5;X(4)=3; // testverdier for n=5
+    h=1.0/(n+1);
+    vec x= linspace(0,1,n+2);
 
-    for (int i=0;i<n;++i)           // Lager funksjonsvektoren
+    mat A=zeros<mat>(n,n);
+
+    // Vector a, b og c in tridiagonal matrix
+    vec tridiag_a= vec(n); tridiag_a.fill(-1);
+    vec tridiag_b= vec(n); tridiag_b.fill(2);
+    vec tridiag_c= tridiag_a;
+    tridiag_a(0)=0;
+    tridiag_c(n-1)=0;
+
+    // Vector with initial function
+    h_squared=h*h;
+    vec init_b= h_squared*100*exp(-10*x);
+    init_b(0)=0;init_b(n+1)=0; //Start and end point are unaffected by calculations
+    vec b_marked=init_b.subvec(1,n);       // Copy of inital function to be used in later calculations
+
+    // Forward sweep
+    tridiag_c(0) = tridiag_c(0) / tridiag_b(0);
+    init_b(1) = init_b(1) / tridiag_b(0);
+    // The first and last element of init_func are outside the scope of the tridiagonal matrix, and are omitted from calculations
+    for (int i=1;i<n;i++)
     {
-        X(i)= 100*exp(-10*h*i);
+        tridiag_c(i) = tridiag_c(i)/(tridiag_b(i) - tridiag_a(i)*tridiag_c(i-1));
+        init_b(i+1) = (init_b(i+1)-tridiag_a(i) * init_b(i)) / (tridiag_b(i)-tridiag_a(i) * tridiag_c(i-1));
     }
-    //cout << "X:" << endl << X << endl;
 
-    for (int i=1;i<n;++i)           // Redusere nedre trekant av "matrisen" til 0
+    // Back substitution
+    vec ans= init_b;
+    for (int i=n-2;i>=0;i--)
     {
-        gausstall=A(i)/B(i-1);
-        B(i)=B(i)-C(i-1)*gausstall;
-        //A(i)=0;//A(i)=A(i)-B(i-1)*gausstall;     // Skal være =0
-        X(i)=X(i)-X(i-1)*gausstall;
+        ans(i+1)=init_b(i+1)-tridiag_c(i)*ans(i+2);
     }
 
-    for (int i=n-2;i>=0;--i)        // Redusere øvre trekant av "matrisen" til 0
+    // End timing for first calculation method
+    finish = clock();
+    double time_normal = ((finish-start)/(double) CLOCKS_PER_SEC);
+    cout << "Algorithm calc finished"<<endl;
+
+    //Answer matrix for plotting of closed-form and calculated function
+    vec closedform= 1.0-(1.0-exp(-10.0))*x-exp(-10.0*x);
+    mat svar= mat(n+2,3);
+    for (int i=0;i<n+2;++i)
     {
-        gausstall=C(i)/B(i+1);
-        //B(i)=B(i)-A(i+1)*gausstall;     // Skal være =B(i)
-        //C(i)=0;//C(i)=C(i)-B(i+1)*gausstall;     // Skal være =0
-        X(i)=X(i)-X(i+1)*gausstall;
+        svar(i,0)=h*i;
+        svar(i,1)=closedform(i);
+        svar(i,2)=ans(i);
     }
 
-    for (int i=0;i<n;++i)           // Normere diagonalen
+    // Saving answer matrix with file name including value of n
+    std::ostringstream namein;
+    namein << "Solution_" << n << ".dat";
+    std::string filename = namein.str();
+    svar.save(filename, raw_ascii);
+
+    // Relative error
+    vec error=log10(abs(ans-closedform)/closedform);
+    error=error.subvec(1,n);
+
+//-----------------------------------------------------------------------------------------
+    // Gaussian elimination
+    // The if loop is present to avoid having conflicts from missing variables furter down which
+    // would have risen from commenting out this part at n>1000
+
+    vec ans_Gaussian= zeros<vec>(n);
+    if(n<1001)
     {
-        X(i)=X(i)/B(i);
-        //B(i)=B(i)/B(i);
-    }
-    //cout << "A:" << endl << A << endl;
-    //cout << "B:" << endl << B << endl;
-    //cout << "C:" << endl << C << endl;
-    cout << "X.n_cols:" << X.n_cols << endl;
-    cout << "X.n_rows:" << X.n_rows << endl;
+    // Creating matrix A
+    mat A=zeros<mat>(n,n);
+    A.diag(0).fill(2);
+    A.diag(1).fill(-1);  // Setting upper and lower tridiagonal as -1
+    A.diag(-1).fill(-1);
 
-    X.reshape(2,X.n_rows);
-    X.save("Solution.dat",raw_ascii);
-    //cout << "X:" << endl << X << endl;
-    //cout << A(2) << endl;
+    start = clock () ;
+    // Solving Ax = b
+
+    ans_Gaussian= solve(A,b_marked);
+
+    finish = clock();
+    }
+    else{start=0;finish=0;}
+
+    double time_Gaussian = ((finish-start)/(double) CLOCKS_PER_SEC);
+
+    cout<<"Gauss calc finished"<< endl;
+
+    // Relative error for Gaussian elimination
+    vec closedform_short=closedform.subvec(1,n);
+    vec error_Gaussian=log10(abs(ans_Gaussian-closedform_short)/closedform_short);
+
+//------------------------------------------------------------------------------------------
+    // LU decomposition
+    // Creating matrices for LU decomp
+    mat P,L,U;
+    vec ans_LU= zeros<vec>(n);
+
+    if(n<1001)
+    {
+    mat A=zeros<mat>(n,n);
+    A.diag(0).fill(2);
+    A.diag(1).fill(-1);  // Setting upper and lower tridiagonal as -1
+    A.diag(-1).fill(-1);
+
+    start = clock () ;
+
+    // Solving for LU decomp
+    lu(L, U, P, A);
+    vec y   = solve(L,b_marked);
+    ans_LU  = solve(U,y);
+
+    finish = clock();
+    }
+    else{start=0;finish=0;}
+
+    double time_LU = ((finish-start)/(double) CLOCKS_PER_SEC);
+
+    cout<<"LU calc finished"<< endl;
+
+    // Relative error for LU decomp
+    vec error_LU=log10(abs(ans_LU-closedform_short)/closedform_short);
+
+//------------------------------------------------------------------------------------------
+    //Answer matrix for comparison of closed-form and calculated functions
+    mat svar_all= mat(n,5);
+    for (int i=0;i<n;++i)
+    {
+        svar_all(i,0)=h*(i+1);
+        svar_all(i,1)=closedform(i+1);
+        svar_all(i,2)=ans(i+1);
+        svar_all(i,3)=ans_Gaussian(i);
+        svar_all(i,4)=ans_LU(i);
+    }
+
+    // Saving comparison matrix
+    namein.str(""); namein.clear(); // Clearing previous value of the string
+    namein << "Solution_all_" << n << ".dat";
+    filename = namein.str();
+    svar_all.save(filename, raw_ascii);
+
+
+    // Saving relative error as a matrix for comparison
+    mat errormat=randn<mat>(n,3);
+    errormat.col(0)=error;
+    errormat.col(1)=error_Gaussian;
+    errormat.col(2)=error_LU;
+
+    namein.str(""); namein.clear(); // Clearing previous value of the string
+    namein << "Error_" << n << ".dat";
+    filename = namein.str();
+    errormat.save(filename, raw_ascii);
+
+//------------------------------------------------------------------------------------------
+    // Printing answers
+    cout << "For n= " << n << ":" << endl;
+    cout << "Max error algorithm = "<< error.max() << endl;
+    cout << "Max error Gaussian = " << error_Gaussian.max() << endl;
+    cout << "Max error LU = "       << error_LU.max() << endl;
+    cout << "Computational time using algorithm: " << time_normal << endl;
+    cout << "Computational time using Gaussian: " << time_Gaussian << endl;
+    cout << "Computational time using LU decomposition: " << time_LU << endl;
     return 0;
 }
+
 
